@@ -202,12 +202,15 @@ def parse_metadata_and_clean_md(raw_md, doc_date, doc_type="board", status="draf
     final_content = "\n".join(fm_lines) + body.strip() + "\n"
     return final_content
 
-def ensure_year_index(year, doc_type="board"):
+def ensure_year_index(year, doc_type="board", dry_run=False):
     if doc_type == "board":
         year_dir = REPO_ROOT / "board" / str(year)
-        year_dir.mkdir(parents=True, exist_ok=True)
         index_file = year_dir / "index.md"
         if not index_file.exists():
+            if dry_run:
+                print(f"  [dry-run] Would create year index: {index_file.relative_to(REPO_ROOT)}")
+                return
+            year_dir.mkdir(parents=True, exist_ok=True)
             content = f"""---
 layout: default
 title: Board Meetings {year}
@@ -222,6 +225,7 @@ Minutes from Board of Directors meetings held in {year}.
 """
             index_file.write_text(content)
             print(f"  Created year index: {index_file.relative_to(REPO_ROOT)}")
+
 
 def process_year(year, dry_run=False, force=False):
     print(f"\n================ Processing {year} ================")
@@ -250,7 +254,7 @@ def process_year(year, dry_run=False, force=False):
             "is_approved": is_approved
         })
 
-    ensure_year_index(year, "board")
+    ensure_year_index(year, "board", dry_run=dry_run)
     
     for (dt, doc_type), candidates in sorted(meetings.items()):
         # Prioritize approved version over draft
