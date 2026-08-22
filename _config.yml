@@ -1,0 +1,61 @@
+title: SF Pride Minutebook
+description: Official meeting minutes and records of San Francisco Pride.
+remote_theme: just-the-docs/just-the-docs
+
+url: "https://sfpride.github.io"
+baseurl: "/minutebook"
+
+aux_links:
+  "sfpride.org":
+    - "//sfpride.org"
+  "Bylaws":
+    - "//sfpride.github.io/bylaws"
+
+heading_anchors: true
+
+# Exclude templates from build (they have placeholder dates)
+exclude:
+  - templates/
+  - README.md
+  - Gemfile
+  - Gemfile.lock
+  - CONTRIBUTORS.md
+  - SIGNING.md
+
+search:
+  enable: true
+  heading_level: 2
+  tokenizer: separator
+
+nav_sort: nav_order
+
+footer_content: "San Francisco Pride Celebration Committee, Inc. • All commits are GPG-signed for authenticity."
+
+# Collections for meeting types
+collections:
+  board:
+    output: true
+    permalink: /board/:path/
+  committees:
+    output: true
+    permalink: /committees/:path/
+  membership:
+    output: true
+    permalink: /membership/:path/
+  resolutions:
+    output: true
+    permalink: /resolutions/:path/
+
+defaults:
+  - scope:
+      path: ""
+      type: "board"
+    values:
+      layout: "default"
+      parent: "Board Meetings"
+  - scope:
+      path: ""
+      type: "resolutions"
+    values:
+      layout: "default"
+      parent: "Resolutions"
