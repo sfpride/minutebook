@@ -40,45 +40,117 @@ def list_drive_files(year=None):
     lines = [l.strip() for l in output.split("\n") if l.strip() and not l.endswith("/")]
     return lines
 
+MONTH_MAP = {
+    "jan": 1, "january": 1,
+    "feb": 2, "february": 2,
+    "mar": 3, "march": 3,
+    "apr": 4, "april": 4,
+    "may": 5,
+    "jun": 6, "june": 6,
+    "jul": 7, "july": 7,
+    "aug": 8, "august": 8,
+    "sep": 9, "sept": 9, "september": 9,
+    "oct": 10, "october": 10,
+    "nov": 11, "november": 11,
+    "dec": 12, "december": 12
+}
+
 def is_valid_minute_doc(path):
     path_lower = path.lower()
     
-    # Must be docx or doc
-    if not (path_lower.endswith(".docx") or path_lower.endswith(".doc")):
+    # Must be docx, doc, or pdf
+    if not (path_lower.endswith(".docx") or path_lower.endswith(".doc") or path_lower.endswith(".pdf")):
         return False
         
     # Skip Closed Session / Confidential documents per policy
-    if any(kw in path_lower for kw in ["closed session", "closed-session", "closed_session", "executive session"]):
+    if any(kw in path_lower for kw in ["closed session", "closed-session", "closed_session", "executive session", "closed"]):
         return False
         
-    # Skip obvious non-minutes
-    if "agenda" in path_lower or "report" in path_lower or "packet" in path_lower:
-        if "minute" not in path_lower:
-            return False
+    # Skip non-minutes reports/agendas unless it explicitly has minute(s)
+    if ("agenda" in path_lower or "report" in path_lower or "packet" in path_lower) and not ("minute" in path_lower or "minutes" in path_lower):
+        return False
 
     if "minute" not in path_lower and "minutes" not in path_lower:
         return False
 
     return True
 
+def extract_date_from_text(text, fallback_year=None):
+    """Scans text header lines for dates"""
+    for line in text.split("\n")[:15]:
+        line_clean = line.strip()
+        # Pattern: Month DD, YYYY or Month DDth YYYY
+        m = re.search(r"\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,)?\s+(\d{4})\b", line_clean, re.IGNORECASE)
+        if m:
+            mo_str, day_str, yr_str = m.groups()
+            mo = MONTH_MAP[mo_str.lower()]
+            return f"{yr_str}-{int(mo):02d}-{int(day_str):02d}"
+            
+        # Pattern: YYYY-Month-DD or YYYY-MMM-DD (e.g. 2023-JAN-04)
+        m = re.search(r"\b(20\d{2})[-/\.]([A-Za-z]{3,9})[-/\.](\d{1,2})\b", line_clean)
+        if m:
+            yr_str, mo_str, day_str = m.groups()
+            mo_key = mo_str.lower()[:3]
+            if mo_key in MONTH_MAP:
+                return f"{yr_str}-{MONTH_MAP[mo_key]:02d}-{int(day_str):02d}"
+                
+        # Pattern: YYYY-MM-DD
+        m = re.search(r"\b(20\d{2})[-/\.]([01]\d)[-/\.]([0-3]\d)\b", line_clean)
+        if m:
+            return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+            
+    return None
+
 def extract_date_from_filename_or_path(path):
     # Match YYYYMMDD or YYYY-MM-DD or MM-DD-YYYY or YYYY.MM.DD
-    m = re.search(r"(20\d{2})[-_.]?([01]\d)[-_.]?([0-3]\d)", path)
+    m = re.search(r"\b(20\d{2})[-_.]?([01]\d)[-_.]?([0-3]\d)\b", path)
     if m:
         return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+
+    # Match Month_DD_YYYY or MonthDD_YYYY e.g. May3BOD23 or JUNE 7 2023 or August 3rd 2023
+    m = re.search(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*[\s_-]+(\d{1,2})(?:st|nd|rd|th)?[\s_-]*(?:bod|sfpride|sf pride)?[\s_-]*(\d{2,4})\b", path, re.IGNORECASE)
+    if m:
+        mo_str, day_str, yr_str = m.groups()
+        mo = MONTH_MAP[mo_str.lower()[:3]]
+        yr = int(yr_str)
+        if yr < 100:
+            yr = 2000 + yr
+        return f"{yr:04d}-{mo:02d}-{int(day_str):02d}"
+
+    # Match MonthDD_YYYY without spaces e.g. May3BOD23
+    m = re.search(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*(\d{1,2})(?:st|nd|rd|th)?(?:bod|sfpride|sf pride)?(\d{2,4})\b", path, re.IGNORECASE)
+    if m:
+        mo_str, day_str, yr_str = m.groups()
+        mo = MONTH_MAP[mo_str.lower()[:3]]
+        yr = int(yr_str)
+        if yr < 100:
+            yr = 2000 + yr
+        return f"{yr:04d}-{mo:02d}-{int(day_str):02d}"
+
     return None
+
 
 def download_file(remote_path, local_dest):
     local_dest.parent.mkdir(parents=True, exist_ok=True)
     full_remote = f"{REMOTE_NAME}:General/{remote_path}"
     run_rclone(["copyto", full_remote, str(local_dest)])
 
-def convert_docx_to_md(docx_path):
-    cmd = ["pandoc", str(docx_path), "-t", "markdown", "--wrap=none"]
-    res = subprocess.run(cmd, capture_output=True, text=True)
-    if res.returncode != 0:
-        raise RuntimeError(f"Pandoc conversion failed for {docx_path}: {res.stderr}")
-    return res.stdout
+def convert_to_md_text(local_path):
+    local_str = str(local_path)
+    if local_str.endswith(".pdf"):
+        res = subprocess.run(["pdftotext", "-layout", local_str, "-"], capture_output=True, text=True)
+        if res.returncode != 0:
+            raise RuntimeError(f"pdftotext failed for {local_path}: {res.stderr}")
+        return res.stdout
+    elif local_str.endswith(".docx") or local_str.endswith(".doc"):
+        cmd = ["pandoc", local_str, "-t", "markdown", "--wrap=none"]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode != 0:
+            raise RuntimeError(f"Pandoc conversion failed for {local_path}: {res.stderr}")
+        return res.stdout
+    else:
+        raise ValueError(f"Unsupported file type: {local_path}")
+
 
 def parse_metadata_and_clean_md(raw_md, doc_date, doc_type="board", status="draft"):
     """
@@ -237,12 +309,21 @@ def process_year(year, dry_run=False, force=False):
     meetings = {}
     for remote_path in valid_files:
         dt = extract_date_from_filename_or_path(remote_path)
+        
+        # If date could not be parsed from filename, download and inspect text
         if not dt:
-            print(f"  ⚠️ Could not parse date from: {remote_path}")
+            cache_file = RAW_CACHE_DIR / str(year) / Path(remote_path).name
+            download_file(remote_path, cache_file)
+            txt = convert_to_md_text(cache_file)
+            dt = extract_date_from_text(txt, fallback_year=year)
+            
+        if not dt:
+            print(f"  ⚠️ Could not determine meeting date for: {remote_path}")
             continue
             
-        doc_type = "membership" if "membership" in remote_path.lower() or "agm" in remote_path.lower() else "board"
+        doc_type = "membership" if "membership" in remote_path.lower() or "agm" in remote_path.lower() or "annual" in remote_path.lower() else "board"
         is_approved = "approved" in remote_path.lower() or "final" in remote_path.lower()
+        is_docx = remote_path.lower().endswith(".docx") or remote_path.lower().endswith(".doc")
         status = "approved" if is_approved else "draft"
         
         key = (dt, doc_type)
@@ -251,14 +332,18 @@ def process_year(year, dry_run=False, force=False):
         meetings[key].append({
             "remote_path": remote_path,
             "status": status,
-            "is_approved": is_approved
+            "is_approved": is_approved,
+            "is_docx": is_docx
         })
 
     ensure_year_index(year, "board", dry_run=dry_run)
     
     for (dt, doc_type), candidates in sorted(meetings.items()):
-        # Prioritize approved version over draft
-        candidates.sort(key=lambda x: (1 if x["is_approved"] else 0), reverse=True)
+        # Prioritize approved over draft, and docx over pdf
+        candidates.sort(key=lambda x: (
+            1 if x["is_approved"] else 0,
+            1 if x["is_docx"] else 0
+        ), reverse=True)
         chosen = candidates[0]
         remote_path = chosen["remote_path"]
         status = chosen["status"]
@@ -275,12 +360,12 @@ def process_year(year, dry_run=False, force=False):
         if dry_run:
             continue
             
-        # Download docx to cache
-        cache_docx = RAW_CACHE_DIR / str(year) / Path(remote_path).name
-        download_file(remote_path, cache_docx)
+        # Download file to cache
+        cache_file = RAW_CACHE_DIR / str(year) / Path(remote_path).name
+        download_file(remote_path, cache_file)
         
         # Convert to Markdown
-        raw_md = convert_docx_to_md(cache_docx)
+        raw_md = convert_to_md_text(cache_file)
         
         # Parse metadata & inject frontmatter
         formatted_md = parse_metadata_and_clean_md(raw_md, dt, doc_type=doc_type, status=status)
@@ -288,6 +373,7 @@ def process_year(year, dry_run=False, force=False):
         # Write final markdown
         dest_file.write_text(formatted_md)
         print(f"  ✅ Written: {dest_file.relative_to(REPO_ROOT)}")
+
 
 def main():
     parser = argparse.ArgumentParser(description="Import minutes from SF Pride Drive to Minutebook.")
