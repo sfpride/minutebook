@@ -9,4 +9,10 @@ vendor/
 *~
 .DS_Store
 _raw/
+_raw_md/
+__pycache__/
+*.egg-info/
+build/
+dist/
+
 
